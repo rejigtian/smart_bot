@@ -32,3 +32,6 @@ frontend/dist/
 backend/build/
 android/**/build/
 frontend/.vite/
+
+# Local KB config (project-specific paths) — use config.example.yml as template
+test_knowledge/config.yml

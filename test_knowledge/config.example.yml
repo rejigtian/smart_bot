@@ -1,0 +1,52 @@
+# Test Knowledge Base — 配置模板
+#
+# 把这个文件复制为 config.yml 并按你的项目改。
+# 然后跑: python test_knowledge/scripts/build_kb.py --all
+#
+# 核心字段：
+#   project.app_package    — 你的 Android App 包名（Agent 启动时用）
+#   source.root            — Android 源码根目录（绝对或 ~/ 开头）
+#   modules                — 你项目的模块划分
+#
+# 业务知识库（business_kb）是可选的 —— 用于从已有业务 md 抽取摘要。
+# 没有就删掉整个 business_kb 段，KB 只用源码扫描 + LessonLearned 构建。
+
+project:
+  name: my-app
+  display_name: My App
+  app_package: com.example.myapp
+
+source:
+  root: ~/workspace/my-android-app
+  layout_dir: src/main/res/layout
+  strings_file: src/main/res/values/strings.xml
+  source_dir: src/main/java
+  manifest: src/main/AndroidManifest.xml
+
+# 可选 — 如果有业务知识库
+# business_kb:
+#   root: ~/workspace/my-android-app/docs/business
+#   summary_heading: "业务概述"
+
+modules:
+  # 按你的模块划分写一个就行
+  home:
+    display_name: 首页
+    source_path: module/home                   # 相对 source.root
+    # business_kb_subdir: home                 # 如果有业务 KB
+    default_keywords: [home, main]
+
+  # 可以加更多模块
+  # settings:
+  #   display_name: 设置
+  #   source_path: module/settings
+  #   default_keywords: [settings, config]
+
+# 特定 feature 的扫描关键字（slug 和源码目录名不一致时）
+feature_keywords:
+  # my-feature: [keyword1, keyword2]
+
+# 中文↔英文别名，帮助模糊匹配
+runtime_aliases:
+  # 首页: [home, main, 主页]
+  # 登录: [login, signin]

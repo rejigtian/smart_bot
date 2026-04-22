@@ -1,6 +1,17 @@
 # Test Knowledge Base — 维护计划
 
 > 可循环运行的 KB 构建流程。像业务知识库一样持续更新。
+> **配置驱动，可装载任何项目的 KB。**
+
+---
+
+## 换到另一个项目？
+
+1. 复制 `config.example.yml` 为 `config.yml`
+2. 改 `project.app_package`、`source.root`、`modules` 等
+3. `python test_knowledge/scripts/build_kb.py --all` 自动生成 feature md
+
+整个 KB 就适配新项目了，不需要改代码。
 
 ---
 
@@ -9,14 +20,14 @@
 ```bash
 cd smart-androidbot
 
-# 首次全量构建
+# 首次全量构建（读 config.yml）
 python test_knowledge/scripts/build_kb.py --all
+
+# 指定配置文件（多项目切换）
+python test_knowledge/scripts/build_kb.py --all --config /path/to/other-project.yml
 
 # 单模块增量更新
 python test_knowledge/scripts/build_kb.py --module voice-room
-python test_knowledge/scripts/build_kb.py --module im
-python test_knowledge/scripts/build_kb.py --module social
-python test_knowledge/scripts/build_kb.py --module profile
 
 # 单 feature 更新
 python test_knowledge/scripts/build_kb.py --feature xiuxian

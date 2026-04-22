@@ -7,3 +7,4 @@ litellm>=1.40
 markdown-it-py
 Pillow>=10.0
 httpx>=0.27
+PyYAML>=6.0

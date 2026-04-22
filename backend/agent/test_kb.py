@@ -2,6 +2,7 @@
 Test Knowledge Base Search — query the local test_knowledge/ md files.
 
 Returns relevant feature context for Planner/Agent based on task description.
+Reads aliases from test_knowledge/config.yml — project-agnostic.
 """
 from __future__ import annotations
 
@@ -17,28 +18,32 @@ logger = logging.getLogger(__name__)
 KB_ROOT = Path(__file__).resolve().parent.parent.parent / "test_knowledge"
 FEATURES_DIR = KB_ROOT / "features"
 INDEX_MD = KB_ROOT / "INDEX.md"
+CONFIG_FILE = KB_ROOT / "config.yml"
 
 
 # ── Keyword index (lazy-loaded) ───────────────────────────────────────────
 
 _INDEX_CACHE: Optional[list[dict]] = None
+_ALIASES_CACHE: Optional[dict[str, list[str]]] = None
 
-# Keyword aliases for better matching
-_ALIASES = {
-    "修仙": ["xiuxian", "修炼", "修为", "宗门", "飞升", "小火苗", "结晶", "诛妖", "遗迹"],
-    "xiuxian": ["修仙", "修炼", "修为", "宗门"],
-    "语音房": ["voice-room", "voice_room", "voiceroom", "房间"],
-    "派对": ["party", "派对房", "临时派对"],
-    "KTV": ["ktv", "ktv-room", "唱歌", "点歌", "K 歌"],
-    "拍拍": ["auction", "paipai", "竞价", "拍卖"],
-    "相亲": ["cp", "cp-room"],
-    "家族": ["family", "family-room", "族战"],
-    "匹配": ["match", "audio-match", "速配"],
-    "聊天": ["chat", "im", "私聊", "群聊"],
-    "好友": ["friend", "social"],
-    "朋友圈": ["moments", "玩友圈"],
-    "个人": ["profile", "主页", "设置"],
-}
+
+def _load_aliases() -> dict[str, list[str]]:
+    """Load runtime_aliases from config.yml — empty dict if not available."""
+    global _ALIASES_CACHE
+    if _ALIASES_CACHE is not None:
+        return _ALIASES_CACHE
+    _ALIASES_CACHE = {}
+    if not CONFIG_FILE.exists():
+        return _ALIASES_CACHE
+    try:
+        import yaml
+        raw = yaml.safe_load(CONFIG_FILE.read_text(encoding="utf-8"))
+        _ALIASES_CACHE = (raw or {}).get("runtime_aliases") or {}
+    except ImportError:
+        logger.warning("PyYAML not installed — skipping KB aliases")
+    except Exception as exc:
+        logger.warning("Failed to load KB aliases: %s", exc)
+    return _ALIASES_CACHE
 
 
 def _load_index() -> list[dict]:
@@ -75,8 +80,9 @@ def _load_index() -> list[dict]:
         for w in re.findall(r"[\w一-鿿]+", title):
             if len(w) >= 2:
                 kws.add(w.lower())
-        # Add aliases
-        for primary, alts in _ALIASES.items():
+        # Add aliases from config.yml
+        aliases = _load_aliases()
+        for primary, alts in aliases.items():
             if primary.lower() in slug.lower() or primary in title:
                 kws.update(a.lower() for a in alts)
             if any(alt.lower() in slug.lower() or alt in title for alt in alts):
@@ -194,6 +200,7 @@ def _extract_agent_relevant(content: str) -> str:
 
 def reload_index():
     """Force-reload the index (for testing or after KB updates)."""
-    global _INDEX_CACHE
+    global _INDEX_CACHE, _ALIASES_CACHE
     _INDEX_CACHE = None
+    _ALIASES_CACHE = None
     _load_index()
