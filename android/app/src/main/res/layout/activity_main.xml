@@ -1,0 +1,314 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:fitsSystemWindows="true"
+    android:background="?attr/colorSurface">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <!-- ── Title ── -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Smart Agent"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:id="@+id/textDeviceId"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="11sp"
+            android:fontFamily="monospace"
+            android:alpha="0.5"
+            android:layout_marginBottom="20dp" />
+
+        <!-- ── Status section header ── -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="SETUP STATUS"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:alpha="0.5"
+            android:letterSpacing="0.1"
+            android:layout_marginBottom="8dp" />
+
+        <!-- Accessibility Service card -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardAccessibility"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            app:cardElevation="0dp"
+            app:strokeWidth="1dp"
+            app:strokeColor="?attr/colorOutline"
+            xmlns:app="http://schemas.android.com/apk/res-auto">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:padding="14dp"
+                android:gravity="center_vertical">
+                <View
+                    android:id="@+id/dotAccessibility"
+                    android:layout_width="10dp"
+                    android:layout_height="10dp"
+                    android:background="@drawable/status_dot"
+                    android:layout_marginEnd="12dp" />
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Accessibility Service"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+                    <TextView
+                        android:id="@+id/textAccessibilityStatus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="12sp"
+                        android:alpha="0.6" />
+                </LinearLayout>
+                <Button
+                    android:id="@+id/btnEnableAccessibility"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Enable"
+                    android:textSize="12sp"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    style="@style/Widget.Material3.Button.TonalButton" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- IME card -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardIme"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            app:cardElevation="0dp"
+            app:strokeWidth="1dp"
+            app:strokeColor="?attr/colorOutline"
+            xmlns:app="http://schemas.android.com/apk/res-auto">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:padding="14dp"
+                android:gravity="center_vertical">
+                <View
+                    android:id="@+id/dotIme"
+                    android:layout_width="10dp"
+                    android:layout_height="10dp"
+                    android:background="@drawable/status_dot"
+                    android:layout_marginEnd="12dp" />
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Input Method (IME)"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+                    <TextView
+                        android:id="@+id/textImeStatus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="12sp"
+                        android:alpha="0.6" />
+                </LinearLayout>
+                <Button
+                    android:id="@+id/btnEnableIme"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Setup"
+                    android:textSize="12sp"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    style="@style/Widget.Material3.Button.TonalButton" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Connection status card -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardConnection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="20dp"
+            app:cardElevation="0dp"
+            app:strokeWidth="1dp"
+            app:strokeColor="?attr/colorOutline"
+            xmlns:app="http://schemas.android.com/apk/res-auto">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:padding="14dp"
+                android:gravity="center_vertical">
+                <View
+                    android:id="@+id/dotConnection"
+                    android:layout_width="10dp"
+                    android:layout_height="10dp"
+                    android:background="@drawable/status_dot"
+                    android:layout_marginEnd="12dp" />
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Server Connection"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+                    <TextView
+                        android:id="@+id/textConnectionStatus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="12sp"
+                        android:alpha="0.6"
+                        android:text="Not connected" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Keep-alive toggle card -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardKeepAlive"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="20dp"
+            app:cardElevation="0dp"
+            app:strokeWidth="1dp"
+            app:strokeColor="?attr/colorOutline"
+            xmlns:app="http://schemas.android.com/apk/res-auto">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:padding="14dp"
+                android:gravity="center_vertical">
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Keep-Alive"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Wake lock + service monitor + auto-start on boot"
+                        android:textSize="12sp"
+                        android:alpha="0.6" />
+                </LinearLayout>
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/switchKeepAlive"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ── Config section header ── -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="CONFIGURATION"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:alpha="0.5"
+            android:letterSpacing="0.1"
+            android:layout_marginBottom="8dp" />
+
+        <!-- Server URL -->
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Server URL (ws://…)"
+            android:layout_marginBottom="12dp"
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/editServerUrl"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="textUri"
+                android:singleLine="true" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <!-- Auth Token -->
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Auth Token"
+            android:layout_marginBottom="12dp"
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+            app:endIconMode="password_toggle"
+            xmlns:app="http://schemas.android.com/apk/res-auto">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/editToken"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="textPassword"
+                android:singleLine="true" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <!-- Device Name -->
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Device Name"
+            android:layout_marginBottom="20dp"
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/editDeviceName"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:singleLine="true" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <!-- Buttons -->
+        <Button
+            android:id="@+id/btnConnect"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Connect to Server"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btnDisconnect"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Disconnect"
+            android:layout_marginBottom="8dp"
+            style="@style/Widget.Material3.Button.OutlinedButton" />
+
+        <Button
+            android:id="@+id/btnSave"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Save Settings"
+            style="@style/Widget.Material3.Button.TextButton" />
+
+    </LinearLayout>
+</ScrollView>

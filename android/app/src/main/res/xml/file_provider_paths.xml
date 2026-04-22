@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- APKs downloaded for installation are stored in the app's cache dir -->
+    <cache-path name="apk_downloads" path="." />
+</paths>

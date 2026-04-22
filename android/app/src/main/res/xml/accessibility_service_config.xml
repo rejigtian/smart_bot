@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeAllMask"
+    android:accessibilityFeedbackType="feedbackAllMask"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows|flagRequestTouchExplorationMode"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
+    android:canTakeScreenshot="true"
+    android:description="@string/accessibility_service_description"
+    android:isAccessibilityTool="true"
+    android:notificationTimeout="0"
+    android:settingsActivity=".ui.MainActivity" />
