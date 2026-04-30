@@ -33,5 +33,9 @@ backend/build/
 android/**/build/
 frontend/.vite/
 
-# Local KB config (project-specific paths) — use config.example.yml as template
+# Local KB — project-specific business knowledge, never commit.
+# Use config.example.yml as a template; run build_kb.py to regenerate locally.
 test_knowledge/config.yml
+test_knowledge/INDEX.md
+test_knowledge/features/
+test_knowledge/common/
