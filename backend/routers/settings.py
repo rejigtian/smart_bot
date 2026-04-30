@@ -15,7 +15,7 @@ SETTINGS_PATH.parent.mkdir(exist_ok=True)
 class Settings(BaseModel):
     openai_api_key: Optional[str] = ""
     anthropic_api_key: Optional[str] = ""
-    anthropic_base_url: Optional[str] = ""   # e.g. https://litellm.wepieoa.com for proxy
+    anthropic_base_url: Optional[str] = ""   # optional override (e.g. internal LiteLLM proxy URL)
     gemini_api_key: Optional[str] = ""
     zhipu_api_key: Optional[str] = ""
     groq_api_key: Optional[str] = ""

@@ -1,197 +1,205 @@
-# Test Knowledge Base — 维护计划
+# Test Knowledge Base — 使用指南
 
-> 可循环运行的 KB 构建流程。像业务知识库一样持续更新。
-> **配置驱动，可装载任何项目的 KB。**
-
----
-
-## 换到另一个项目？
-
-1. 复制 `config.example.yml` 为 `config.yml`
-2. 改 `project.app_package`、`source.root`、`modules` 等
-3. `python test_knowledge/scripts/build_kb.py --all` 自动生成 feature md
-
-整个 KB 就适配新项目了，不需要改代码。
+> 配置驱动的测试知识库系统。Agent 在执行测试任务前会从 KB 检索相关 feature 上下文（入口路径、关键元素、已知坑点），让规划更准确、避免重蹈覆辙。
 
 ---
 
-## 运行方式
+## 这是什么
+
+Test KB 是一个 **per-feature** 的 markdown 集合，每个 md 文件描述被测 App 的一个功能（首页、登录、某个具体页面等），包含：
+
+- 业务摘要：这个 feature 是干什么的
+- 入口路径：从 App 启动到这个 feature 的导航步骤
+- 关键元素：strings.xml 里的中文文本、layout 资源 id
+- 典型测试步骤：人工编写的测试步骤参考
+- 已知坑点：从历史 LessonLearned 自动汇总
+- 相关源码：自动扫描得到的 Activity/Fragment/layout 列表
+
+Agent 收到任务时会从 KB 找最相关的 feature md，把内容注入到 Planner，让规划阶段就拿到准确的元素 id 和已知陷阱。
+
+---
+
+## 快速开始（5 分钟）
 
 ```bash
-cd smart-androidbot
+cd smart-bot-open-source
 
-# 首次全量构建（读 config.yml）
+# 1. 复制配置模板
+cp test_knowledge/config.example.yml test_knowledge/config.yml
+
+# 2. 编辑 config.yml，至少改这几个字段：
+#    - project.app_package    被测 App 的包名
+#    - source.root            Android 源码根目录
+#    - modules                你的项目模块划分
+nano test_knowledge/config.yml
+
+# 3. 全量构建（自动扫描源码生成 feature md）
+python test_knowledge/scripts/build_kb.py --all
+```
+
+构建完后会得到 `test_knowledge/features/<module>/<feature>.md` 一组文件，每个文件的 AUTO 区段已填好，HUMAN 区段留空给你后续补充。
+
+---
+
+## 配置文件（config.yml）
+
+```yaml
+project:
+  name: my-app
+  display_name: My App
+  app_package: com.example.myapp        # Agent 用这个包名启动 App
+
+source:
+  root: ~/workspace/my-android-app      # 绝对路径或 ~/ 开头
+  layout_dir: src/main/res/layout
+  strings_file: src/main/res/values/strings.xml
+  source_dir: src/main/java
+  manifest: src/main/AndroidManifest.xml
+
+# 可选：如果项目已有手写的业务知识库（md 形式），可以引入
+# business_kb:
+#   root: ~/workspace/my-android-app/docs/business
+#   summary_heading: "业务概述"      # 摘要从这个 heading 下抽取
+
+modules:
+  home:
+    display_name: 首页
+    source_path: module/home            # 相对 source.root
+    default_keywords: [home, main]      # 用于扫描源码相关文件
+
+  settings:
+    display_name: 设置
+    source_path: module/settings
+    default_keywords: [settings, config]
+
+# 中英文别名 — 帮模糊匹配
+runtime_aliases:
+  首页: [home, main, 主页]
+  登录: [login, signin]
+```
+
+完整字段说明见 `config.example.yml`。
+
+---
+
+## 命令参考
+
+```bash
+# 全量构建（首次必须）
 python test_knowledge/scripts/build_kb.py --all
 
 # 指定配置文件（多项目切换）
-python test_knowledge/scripts/build_kb.py --all --config /path/to/other-project.yml
+python test_knowledge/scripts/build_kb.py --all --config /path/to/another.yml
 
 # 单模块增量更新
-python test_knowledge/scripts/build_kb.py --module voice-room
+python test_knowledge/scripts/build_kb.py --module <module-name>
 
 # 单 feature 更新
-python test_knowledge/scripts/build_kb.py --feature xiuxian
+python test_knowledge/scripts/build_kb.py --feature <feature-slug>
 
-# 仅更新已知坑点（从 LessonLearned 汇总，无需源码）
+# 仅刷新已知坑点（从最近的 LessonLearned 汇总，不重扫源码）
 python test_knowledge/scripts/build_kb.py --lessons-only
 ```
 
 ---
 
-## 优先级和覆盖范围
+## feature md 的结构
 
-### P0: 语音房（voice-room）
-- [x] xiuxian 修仙（手写模板，作为格式参考）
-- [ ] room-entry 房间入口流程（所有房型共用）
-- [ ] auction-room 拍拍房
-- [ ] cp-room CP 房
-- [ ] ktv-room KTV 房
-- [ ] family-room 家族房
-- [ ] audio-match 语音匹配房
-- [ ] fixroom 固定房
-- [ ] newbie-room 新手房
-- [ ] red-packet 红包玩法
-- [ ] pk-system PK 玩法
-- [ ] love-home 爱家
-- [ ] wedding 婚礼
-
-### P1: 聊天（im）
-- [ ] private-chat 私聊
-- [ ] group-chat 群聊
-- [ ] voice-message 语音消息
-- [ ] gift-message 礼物消息
-
-### P2: 社交（social）
-- [ ] friends 好友
-- [ ] moments 玩友圈（朋友圈）
-- [ ] intimacy 亲密关系
-- [ ] relation 关系链
-
-### P3: 个人（profile）
-- [ ] profile-main 个人主页
-- [ ] profile-edit 编辑资料
-- [ ] settings 设置
-- [ ] avatar-square 头像广场
-
----
-
-## 数据来源（混合）
-
-每次 `build_kb.py` 运行时依次扫描：
-
-```
-1. huiwan-lore-for-ai/knowledge/business/features/<module>/  (业务 md)
-   → 提取业务描述、安全提示、UI 组件清单
-   → 保留为"业务引用"区段
-
-2. wespy-android/module/<module>/src/                        (源码)
-   → 扫描 Fragment/Activity
-   → 扫描 res/layout/*.xml 提取 resourceId
-   → 扫描 res/values/strings.xml 提取中文 label
-   → 生成"关键元素"表
-
-3. smart-androidbot/backend/data/db.sqlite3                  (历史数据)
-   → 汇总同 module 的 LessonLearned
-   → 提取星标参考的成功路径
-   → 更新"已知坑点"+ "典型测试步骤"
-
-4. HUMAN_EDIT 区段                                            (人工)
-   → 保留手写的测试建议，脚本不覆盖
-```
-
----
-
-## 单 feature md 的结构（固定）
-
-每个 feature md 有 7 个 section，脚本幂等更新其中**自动区段**，保留**人工编辑区段**：
+每个 feature md 由若干区段组成，**自动区段** 由脚本生成、可以重复覆盖；**人工区段** 由你写，脚本永远不动它。
 
 ```markdown
 # <Feature 名>
 
 <!-- AUTO: meta -->
-> 来源: [business/xxx.md](链接)
-> 源码: module/xxx/src/...
-> 最后更新: <date> | 状态: <auto|human-verified>
+> 业务来源: <如果有 business_kb 链接>
+> 源码模块: module/xxx
+> 最后更新: 2026-04-30 | 状态: auto + human-edited
 <!-- END AUTO -->
 
 ## 业务简介
 <!-- AUTO: business-summary -->
-从 business/xxx.md 提取的 1-2 段业务描述
+（从 business_kb 抽取的 1-2 段简介；没配 business_kb 时为空）
 <!-- END AUTO -->
 
 ## 入口路径
-<!-- HUMAN: 人工编辑，脚本不覆盖 -->
-首页 → 派对 tab → ...
+<!-- HUMAN -->
+（人工填：从 App 启动到这个 feature 的导航步骤）
+首页 → 设置 → 账号 → 登录
 <!-- END HUMAN -->
 
 ## 关键元素
 <!-- AUTO: elements -->
-| 元素 | ID | 文本 | 来源 |
-|------|-----|------|------|
-| 派对 tab | tab_party | "派对" | strings.xml |
+| 元素 | ID / Name | 文本 | 来源 |
+|------|-----------|------|------|
+| 登录按钮 | btn_login | "登录" | strings.xml |
+| ... | ... | ... | ... |
 <!-- END AUTO -->
 
 ## 典型测试步骤
 <!-- HUMAN -->
-1. start_app(com.wepie.wespy)
-2. ...
+（人工填：写给 Agent 看的、推荐的测试路径）
 <!-- END HUMAN -->
 
 ## 已知坑点
 <!-- AUTO: lessons -->
-从 LessonLearned 汇总
+（从 LessonLearned 表自动汇总的失败教训）
 <!-- END AUTO -->
 
 ## 相关源码
 <!-- AUTO: source-links -->
+- Activity: ...
 - Fragment: ...
+- Layout: ...
 <!-- END AUTO -->
 ```
 
 ---
 
-## 扫描器如何处理"人工 vs 自动"
+## AUTO vs HUMAN 区段
 
-脚本读取现有 md 时：
+构建脚本读取现有 md 时：
 
-- `<!-- AUTO: xxx -->` 和 `<!-- END AUTO -->` 之间的内容 → 丢弃、重新生成
-- `<!-- HUMAN -->` 和 `<!-- END HUMAN -->` 之间的内容 → 保留原样
+- `<!-- AUTO: xxx -->` 到 `<!-- END AUTO -->` 之间 → 丢弃、用最新扫描结果重新生成
+- `<!-- HUMAN -->` 到 `<!-- END HUMAN -->` 之间 → 保留原样
 
-这样你可以：
-1. 先让脚本生成自动部分
-2. 手动补充 HUMAN 部分
-3. 以后再跑脚本，HUMAN 部分不丢
+工作流：
+
+1. 跑一次 `--all` 让脚本生成所有 AUTO 区段
+2. 手动补充 HUMAN 区段（入口路径 + 典型测试步骤）
+3. 以后源码变了就再跑 `--all`，AUTO 区段刷新，HUMAN 区段不丢
 
 ---
 
-## Agent 如何使用 KB
-
-运行时流程：
+## Agent 怎么用 KB
 
 ```
-用户提交任务: "打开修仙收取结晶"
+任务: "打开 App 设置页面，确认账号信息正确"
        ↓
-Planner 启动前: 
-    search_feature("修仙 结晶") 
-    → 匹配 xiuxian.md
-    → 读取该 md 的 "入口路径 + 关键元素 + 已知坑点"
+Agent 启动前:
+    search_feature(任务描述)
+    → 模糊匹配到 settings/account.md
+    → 读取该 md 的 「入口路径 + 关键元素 + 已知坑点」
     → 作为上下文注入到 Planner
        ↓
-Planner 生成的 plan 带有准确的元素 ID 和弹窗预警
+Planner 生成的 plan 自带准确的元素 id 和弹窗预警
        ↓
 Agent 执行更快、更准
 ```
 
----
-
-## 更新频率建议
-
-- **业务 md 变更后**: 跑一次 `--module <name>` 同步业务引用
-- **Android 大版本更新**: 跑 `--all` 全量重建（重点元素 ID/strings 会变）
-- **每跑 10-20 次测试**: 跑 `--lessons-only` 汇总最新坑点
+模糊匹配靠 `runtime_aliases` 字段：你写中文任务时，会查到对应的英文 feature slug。
 
 ---
 
-## 索引维护
+## 维护节奏建议
 
-`INDEX.md` 是所有 feature 的快速索引，脚本运行后自动更新。AI 查询 KB 时会先读这个索引做粗筛。
+| 时机 | 跑什么 |
+|------|--------|
+| 业务 md 变更 | `--module <name>` 同步业务摘要 |
+| Android 大版本更新（资源/类名变化） | `--all` 全量重建 |
+| 跑了一批新测试 | `--lessons-only` 把最新坑点汇总进 KB |
+
+---
+
+## 索引文件
+
+`INDEX.md` 是所有 feature 的总索引（脚本运行后自动生成、自动更新）。Agent 查 KB 时先读它做粗筛，再读具体 feature md。**不要手动编辑 INDEX.md**。

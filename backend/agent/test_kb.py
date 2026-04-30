@@ -139,7 +139,7 @@ def search_feature(query: str, top_k: int = 1) -> str:
     """Search the test KB for relevant feature(s) and return markdown content.
 
     Args:
-        query: task description (e.g. "打开修仙收取结晶")
+        query: task description (e.g. "open settings page and check version")
         top_k: how many top features to return
 
     Returns:

@@ -122,10 +122,10 @@ class LessonLearned(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     case_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)  # specific case, or null for global
     suite_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)  # for suite-level lessons
-    app_package: Mapped[str] = mapped_column(String, default="")   # e.g. "com.wepie.wespy"
+    app_package: Mapped[str] = mapped_column(String, default="")   # e.g. "com.example.app"
     task_keyword: Mapped[str] = mapped_column(String, default="")  # key part of path for fuzzy matching across quick runs
-    screen_context: Mapped[str] = mapped_column(String, default="")  # e.g. "派对房间内"
-    lesson: Mapped[str] = mapped_column(Text, default="")  # "不要点击底部聊天输入框，会弹出键盘"
+    screen_context: Mapped[str] = mapped_column(String, default="")  # e.g. "Settings detail page"
+    lesson: Mapped[str] = mapped_column(Text, default="")  # e.g. "Do not tap the bottom chat input — it opens the keyboard"
     source_run_id: Mapped[str] = mapped_column(String, default="")
     source_step: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

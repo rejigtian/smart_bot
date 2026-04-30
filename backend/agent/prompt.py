@@ -70,9 +70,10 @@ not just what the screenshot looks like, to know where you actually are.
 - If the current Page doesn't match what the task expects, do NOT keep tapping around — \
 navigate back (global_action("back")) or restart the app (start_app) to return to a \
 known state, then try a different path.
-- If the UI Elements list doesn't contain an element the task mentions (e.g. "派对 tab"), \
-the element is likely OFF-SCREEN or on a DIFFERENT page. Scroll to reveal it, or go back \
-to find it from a different entry point. Do NOT click random buttons hoping to find it.
+- If the UI Elements list doesn't contain an element the task mentions (e.g. a specific tab \
+or button name), the element is likely OFF-SCREEN or on a DIFFERENT page. Scroll to reveal \
+it, or go back to find it from a different entry point. Do NOT click random buttons hoping \
+to find it.
 
 Avoid common mistakes:
 - NEVER tap EditText / input fields unless the task explicitly requires text input. \
@@ -83,11 +84,12 @@ tap(x, y) which might miss and hit the input field.
 matches your intention. Do NOT tap by position alone — an element at the bottom of \
 the screen could be a chat input bar, not the button you want.
 - In game UIs or custom-drawn screens, look for SPECIFIC visual cues described in the \
-task (e.g. "小火苗" = small flame icon). Do NOT tap randomly or guess — study the \
-screenshot carefully, identify the exact visual element, then tap its center coordinates.
+task (e.g. an icon described by shape, color, or label). Do NOT tap randomly or guess — \
+study the screenshot carefully, identify the exact visual element, then tap its center \
+coordinates.
 - When you see multiple similar-looking buttons, read their text/resourceId to distinguish \
-them. For example, "修炼" (cultivation) and "丹药" (pills) are DIFFERENT features — \
-tap the one that matches the task description, not any nearby button.
+them. Buttons that look similar may map to DIFFERENT features (e.g. "Edit profile" vs \
+"Edit avatar") — tap the one whose text matches the task description, not any nearby button.
 
 Recovery rules:
 - If [Device State] shows App: 系统桌面 (home screen) or any app DIFFERENT from the \
