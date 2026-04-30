@@ -242,6 +242,31 @@ TOOLS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "request_screenshot",
+            "description": (
+                "Request a screenshot to be included in the NEXT step's input. "
+                "Use this ONLY when ALL the following are true:\n"
+                "1. The CURRENT step is text-only (no screenshot was sent this step).\n"
+                "2. You need visual confirmation that CANNOT be resolved from [UI Elements] "
+                "alone — e.g., task mentions a bottom tab you can't find in the list, "
+                "element positions are unclear, or Canvas/non-a11y content is involved.\n"
+                "\n"
+                "RULES (enforced server-side):\n"
+                "- Limited to 3 calls per test case — use sparingly.\n"
+                "- Has NO effect if the current step already included a screenshot.\n"
+                "- Can be called ALONGSIDE another action (tap/scroll/etc.) in the same step.\n"
+                "- Do NOT use to 'double-check' — trust [UI Elements] unless genuinely needed.\n"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "mark_done",
             "description": (
                 "Mark the test case as finished. "

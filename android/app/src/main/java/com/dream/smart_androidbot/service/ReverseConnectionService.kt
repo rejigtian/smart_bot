@@ -4,8 +4,15 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import com.dream.smart_androidbot.R
 import com.dream.smart_androidbot.config.ConfigManager
@@ -17,15 +24,18 @@ import java.net.URI
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Foreground service that maintains a reverse WebSocket connection to the backend server.
+ * Foreground service that maintains a reverse WebSocket connection to the backend.
  *
- * The device (Android) is the WS *client*; the server is the WS *server*.
- * On each JSON-RPC request, the device dispatches the action and sends the result back
- * over the same connection.
- *
- * Protocol:
- *   Incoming: { "id": "<uuid>", "method": "tap", "params": { "x": 500, "y": 500 } }
- *   Outgoing: { "id": "<uuid>", "status": "success", "result": "Tapped (500, 500)" }
+ * Reliability patterns (modeled after droidrun-portal):
+ *  - `connectionLostTimeout` on the WebSocketClient → library-level ping/pong
+ *    catches dead connections without waiting for next send.
+ *  - Reconnect timer is tracked from the LAST FAILURE, not service start —
+ *    so a 30-min reconnect budget resets every successful connect.
+ *  - Terminal HTTP errors (401/403/400) stop retrying immediately.
+ *  - Handler-based scheduling with `isReconnecting` guard prevents duplicate
+ *    reconnect attempts from overlapping onError/onClose callbacks.
+ *  - Old connections are explicitly closed before creating a new one
+ *    (prevents zombie ws eating RAM/sockets).
  */
 class ReverseConnectionService : Service() {
 
@@ -33,25 +43,43 @@ class ReverseConnectionService : Service() {
         private const val TAG = "ReverseConn"
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "smart_agent_channel"
-        private const val RECONNECT_DELAY_MS = 5_000L
-        private const val MAX_RECONNECT_DURATION_MS = 30 * 60 * 1000L  // 30 minutes
+        private const val RECONNECT_DELAY_MS = 3_000L
+        private const val RECONNECT_GIVE_UP_MS = 30 * 60 * 1000L  // 30 min since FIRST failure
+        private const val CONNECTION_LOST_TIMEOUT_SEC = 30
 
         const val ACTION_START = "com.dream.smart_androidbot.ACTION_START"
         const val ACTION_STOP  = "com.dream.smart_androidbot.ACTION_STOP"
 
         @Volatile private var instance: ReverseConnectionService? = null
         fun isRunning(): Boolean = instance != null
+
+        /** 401/403/400 — don't retry; configuration is broken. */
+        internal fun isTerminalClose(reason: String?): Boolean {
+            if (reason == null) return false
+            return reason.contains("Unauthorized", ignoreCase = true) ||
+                    reason.contains("Forbidden", ignoreCase = true) ||
+                    reason.contains("Bad Request", ignoreCase = true) ||
+                    reason.startsWith("401") ||
+                    reason.startsWith("403") ||
+                    reason.startsWith("400")
+        }
     }
 
-    // current active client — set when connected, cleared when closed
-    @Volatile private var activeClient: AgentWebSocketClient? = null
+    @Volatile private var webSocketClient: AgentWebSocketClient? = null
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val running = AtomicBoolean(false)
+    private val handler = Handler(Looper.getMainLooper())
+    private val isServiceRunning = AtomicBoolean(false)
+    private val isReconnecting = AtomicBoolean(false)
+
+    // Timer starts on FIRST failure; resets to 0 on successful connect.
+    @Volatile private var reconnectStartedAtMs = 0L
+
     private var dispatcher: ActionDispatcher? = null
+    private var isForeground = false
     private lateinit var config: ConfigManager
 
-    // ── Service lifecycle ─────────────────────────────────────────────────────
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     override fun onCreate() {
         super.onCreate()
@@ -68,9 +96,9 @@ class ReverseConnectionService : Service() {
                 return START_NOT_STICKY
             }
             else -> {
-                startForeground(NOTIFICATION_ID, buildNotification("Connecting…"))
-                if (running.compareAndSet(false, true)) {
-                    scope.launch { connectLoop() }
+                ensureForeground()
+                if (isServiceRunning.compareAndSet(false, true)) {
+                    connectToHost()
                 }
             }
         }
@@ -78,70 +106,119 @@ class ReverseConnectionService : Service() {
     }
 
     override fun onDestroy() {
-        running.set(false)
+        isServiceRunning.set(false)
+        isReconnecting.set(false)
+        handler.removeCallbacksAndMessages(null)
         scope.cancel()
-        try { activeClient?.close() } catch (_: Exception) {}
-        activeClient = null
+        disconnect()
+        if (isForeground) {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+            isForeground = false
+        }
         if (instance === this) instance = null
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    // ── WebSocket reconnect loop ──────────────────────────────────────────────
+    // ── Connect / reconnect ───────────────────────────────────────────────────
 
-    private suspend fun connectLoop() {
-        val startTime = System.currentTimeMillis()
-        while (running.get()) {
-            val elapsed = System.currentTimeMillis() - startTime
-            if (elapsed > MAX_RECONNECT_DURATION_MS) {
-                Log.w(TAG, "Giving up after 30 minutes of reconnect attempts")
-                break
-            }
+    private fun connectToHost() {
+        if (!isServiceRunning.get()) return
 
-            val url = config.serverUrl
-            val token = config.token
-            if (url.isBlank() || token.isBlank()) {
-                Log.w(TAG, "Server URL or token not configured — waiting 10s")
-                delay(10_000)
-                continue
-            }
-
-            try {
-                Log.i(TAG, "Connecting to $url")
-                updateNotification("Connecting…")
-
-                val client = AgentWebSocketClient(
-                    serverUrl   = url,
-                    token       = token,
-                    config      = config,
-                    onMessage   = ::handleMessage,
-                    onOpened    = { updateNotification("Connected to $url") },
-                    onClosed    = { code, reason ->
-                        Log.i(TAG, "Connection closed: code=$code reason=$reason")
-                        activeClient = null
-                        if (running.get()) updateNotification("Reconnecting…")
-                    }
-                )
-
-                activeClient = client
-                // connect() is non-blocking; awaitClose() suspends until onClose fires
-                client.connect()
-                client.awaitClose()
-
-            } catch (e: CancellationException) {
-                throw e  // propagate coroutine cancellation
-            } catch (e: Exception) {
-                Log.e(TAG, "Connection error: ${e.message}")
-                activeClient = null
-            }
-
-            if (running.get()) {
-                Log.i(TAG, "Reconnecting in ${RECONNECT_DELAY_MS}ms…")
-                delay(RECONNECT_DELAY_MS)
-            }
+        val url = config.serverUrl
+        val token = config.token
+        if (url.isBlank() || token.isBlank()) {
+            Log.w(TAG, "Server URL or token not configured")
+            updateNotification("Not configured")
+            return
         }
-        stopSelf()
+
+        try {
+            updateNotification("Connecting…")
+            // Prevent zombie — always close previous before creating new
+            disconnect()
+
+            val uri = URI(url)
+            val headers = mapOf(
+                "Authorization" to "Bearer $token",
+                "X-Device-ID"   to config.deviceId,
+                "X-Device-Name" to config.deviceName,
+            )
+            Log.i(TAG, "Connecting to $url (device=${config.deviceId})")
+
+            val client = AgentWebSocketClient(
+                uri = uri,
+                headers = headers,
+                openedCallback = {
+                    Log.i(TAG, "Connected")
+                    reconnectStartedAtMs = 0L    // reset give-up timer on success
+                    updateNotification("Connected to ${uri.host}")
+                },
+                messageCallback = ::handleMessage,
+                closedCallback = { code, reason, _ ->
+                    Log.w(TAG, "Disconnected code=$code reason=$reason")
+                    logNetworkState("onClose")
+                    if (isTerminalClose(reason)) {
+                        Log.w(TAG, "Terminal error — not retrying")
+                        updateNotification("Auth failed (${reason ?: "terminal"})")
+                        isReconnecting.set(false)
+                        handler.removeCallbacksAndMessages(null)
+                    } else {
+                        scheduleReconnect()
+                    }
+                },
+                errorCallback = { ex ->
+                    Log.e(TAG, "WS error: ${ex?.message}")
+                    logNetworkState("onError")
+                    scheduleReconnect()  // safety net — onClose usually follows
+                },
+            )
+
+            // Library-level ping/pong — detects dead connections within 30s
+            client.connectionLostTimeout = CONNECTION_LOST_TIMEOUT_SEC
+            webSocketClient = client
+            client.connect()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initiate connection: ${e.message}")
+            scheduleReconnect()
+        }
+    }
+
+    private fun scheduleReconnect() {
+        if (!isServiceRunning.get()) return
+        if (isReconnecting.getAndSet(true)) return  // already scheduled
+
+        val now = SystemClock.elapsedRealtime()
+        if (reconnectStartedAtMs <= 0L) {
+            reconnectStartedAtMs = now
+        }
+
+        if (now - reconnectStartedAtMs >= RECONNECT_GIVE_UP_MS) {
+            Log.w(TAG, "Giving up after ${(now - reconnectStartedAtMs) / 60_000}min of retries")
+            isReconnecting.set(false)
+            reconnectStartedAtMs = 0L
+            updateNotification("Disconnected (retry exhausted)")
+            return
+        }
+
+        updateNotification("Reconnecting in ${RECONNECT_DELAY_MS / 1000}s…")
+        handler.postDelayed({
+            if (isServiceRunning.get()) {
+                isReconnecting.set(false)
+                connectToHost()
+            } else {
+                isReconnecting.set(false)
+            }
+        }, RECONNECT_DELAY_MS)
+    }
+
+    private fun disconnect() {
+        try {
+            webSocketClient?.close()
+        } catch (_: Exception) {}
+        webSocketClient = null
     }
 
     // ── Message handling ──────────────────────────────────────────────────────
@@ -150,23 +227,14 @@ class ReverseConnectionService : Service() {
         scope.launch {
             try {
                 val json = JSONObject(raw)
-                // id is a UUID string from the backend — preserve as-is
                 val id: Any? = json.opt("id")
                 val method = json.optString("method", "")
                 val params = json.optJSONObject("params") ?: JSONObject()
 
                 Log.d(TAG, "← $method (id=$id)")
-
                 val response = dispatcher?.dispatch(method, params)
                     ?: com.dream.smart_androidbot.api.ApiResponse.Error("Dispatcher not ready")
-
-                val responseJson = response.toJson(id)
-                val msg = responseJson.toString()
-                Log.d(TAG, "→ ${msg.take(200)}")
-
-                // Reply on the same connection that sent the request
-                sender.send(msg)
-
+                sender.send(response.toJson(id).toString())
             } catch (e: Exception) {
                 Log.e(TAG, "Message handling error: ${e.message}")
                 try {
@@ -181,13 +249,34 @@ class ReverseConnectionService : Service() {
         }
     }
 
+    // ── Network diagnostics ───────────────────────────────────────────────────
+
+    private fun logNetworkState(prefix: String) {
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            val net = cm?.activeNetwork
+            val caps = cm?.getNetworkCapabilities(net)
+            if (caps == null) {
+                Log.d(TAG, "$prefix network=unknown")
+                return
+            }
+            val t = buildList {
+                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) add("wifi")
+                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) add("cellular")
+                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) add("ethernet")
+                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) add("vpn")
+            }
+            val validated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            Log.d(TAG, "$prefix network=${t.joinToString(",")} validated=$validated")
+        } catch (_: Exception) {}
+    }
+
     // ── Notification ──────────────────────────────────────────────────────────
 
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
-            CHANNEL_ID,
-            "Smart Agent Connection",
-            NotificationManager.IMPORTANCE_LOW
+            CHANNEL_ID, "Smart Agent Connection",
+            NotificationManager.IMPORTANCE_LOW,
         ).apply { description = "Maintains reverse WebSocket connection to the agent server" }
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
@@ -201,52 +290,52 @@ class ReverseConnectionService : Service() {
             .build()
 
     private fun updateNotification(text: String) {
+        if (!isForeground) return
         getSystemService(NotificationManager::class.java)
             .notify(NOTIFICATION_ID, buildNotification(text))
     }
+
+    private fun ensureForeground() {
+        if (isForeground) return
+        try {
+            val notif = buildNotification("Starting…")
+            startForeground(
+                NOTIFICATION_ID, notif,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+            )
+            isForeground = true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start foreground: ${e.message}")
+        }
+    }
 }
 
-// ── WebSocketClient implementation ────────────────────────────────────────────
+// ── WebSocketClient ───────────────────────────────────────────────────────────
 
-private class AgentWebSocketClient(
-    serverUrl: String,
-    token: String,
-    config: ConfigManager,
-    private val onMessage: (String, AgentWebSocketClient) -> Unit,
-    private val onOpened: () -> Unit,
-    private val onClosed: (Int, String?) -> Unit,
-) : WebSocketClient(
-    URI(serverUrl),
-    org.java_websocket.drafts.Draft_6455(),
-    mapOf(
-        "Authorization" to "Bearer $token",
-        "X-Device-ID"   to config.deviceId,
-        "X-Device-Name" to config.deviceName,
-    ),
-    5_000  // connection timeout ms
-) {
-    // Deferred that completes when the connection closes (or fails to open)
-    private val closedDeferred = CompletableDeferred<Unit>()
+internal class AgentWebSocketClient(
+    uri: URI,
+    headers: Map<String, String>,
+    private val openedCallback: () -> Unit,
+    private val messageCallback: (String, AgentWebSocketClient) -> Unit,
+    private val closedCallback: (Int, String?, Boolean) -> Unit,
+    private val errorCallback: (Exception?) -> Unit,
+) : WebSocketClient(uri, org.java_websocket.drafts.Draft_6455(), headers, 5_000) {
 
-    /** Suspend until this connection closes. */
-    suspend fun awaitClose() = closedDeferred.await()
-
-    override fun onOpen(handshake: ServerHandshake?) {
-        Log.i("AgentWS", "Connected — HTTP ${handshake?.httpStatus}")
-        onOpened()
+    override fun onOpen(handshakedata: ServerHandshake?) {
+        Log.i("AgentWS", "Connected (http=${handshakedata?.httpStatus})")
+        openedCallback()
     }
 
     override fun onMessage(message: String?) {
-        if (message != null) onMessage(message, this)
+        if (message != null) messageCallback(message, this)
     }
 
     override fun onClose(code: Int, reason: String?, remote: Boolean) {
-        onClosed(code, reason)
-        closedDeferred.complete(Unit)
+        closedCallback(code, reason, remote)
     }
 
     override fun onError(ex: Exception?) {
-        Log.e("AgentWS", "WS error: ${ex?.message}")
-        // onClose will also fire after onError, completing closedDeferred there
+        Log.e("AgentWS", "Error: ${ex?.javaClass?.simpleName}: ${ex?.message}")
+        errorCallback(ex)
     }
 }

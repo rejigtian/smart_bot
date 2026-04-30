@@ -70,21 +70,41 @@ async def portal_websocket_endpoint(websocket: WebSocket):
 
     logger.info("Device connected: %s (%s)", db_device_id, device_name)
 
+    ping_fail_count = 0
     try:
         while True:
-            # Use a short receive timeout so we can send periodic pings.
-            # If the client goes silent for >30s without responding to pings,
-            # we treat the connection as dead.
+            # Receive with a long-ish timeout to allow slow RPCs (e.g. 25s
+            # screenshot on Unity pages) to complete without us triggering a
+            # spurious liveness check.
             try:
-                raw = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                raw = await asyncio.wait_for(websocket.receive_text(), timeout=60.0)
                 _handle_message(conn, raw)
             except asyncio.TimeoutError:
-                # No message for 30s — send a WebSocket ping to check liveness.
+                # Silent for 60s. If device is mid-RPC, skip the ping —
+                # pending RPCs prove the device is alive (we're waiting on it).
+                if conn.pending:
+                    logger.debug(
+                        "Skipping ping for %s — %d pending RPC(s)",
+                        db_device_id, len(conn.pending),
+                    )
+                    continue
+                # No pending RPCs — device is idle. Send app-level ping.
                 try:
-                    await asyncio.wait_for(websocket.send_text('{"id":"__ping__","method":"ping","params":{}}'), timeout=5.0)
+                    await asyncio.wait_for(
+                        websocket.send_text('{"id":"__ping__","method":"ping","params":{}}'),
+                        timeout=5.0,
+                    )
+                    ping_fail_count = 0
                 except Exception:
-                    logger.warning("Ping failed for %s — treating as disconnected", db_device_id)
-                    break
+                    ping_fail_count += 1
+                    logger.warning(
+                        "Ping %d failed for %s", ping_fail_count, db_device_id
+                    )
+                    # Only disconnect after 2 consecutive ping failures (~120s silence)
+                    if ping_fail_count >= 2:
+                        logger.warning("Disconnecting %s after %d failed pings",
+                                       db_device_id, ping_fail_count)
+                        break
     except WebSocketDisconnect:
         pass
     except Exception as e:

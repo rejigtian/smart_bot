@@ -163,6 +163,7 @@ def format_ui_state(
     phone = raw_state.get("phone_state", {})
     current_app = phone.get("currentApp", "")
     package = phone.get("packageName", "")
+    activity_name = phone.get("activityName", "")
     is_editable = phone.get("isEditable", False)
     focused_el = phone.get("focusedElement")
     focused_text = ""
@@ -178,6 +179,14 @@ def format_ui_state(
     phone_lines = ["[Device State]"]
     if app_line:
         phone_lines.append(app_line)
+    if activity_name:
+        # Shorten fully-qualified class name to "Class" for readability.
+        # Keep both short and full so the agent can pattern-match either way.
+        short = activity_name.rsplit(".", 1)[-1]
+        if short != activity_name:
+            phone_lines.append(f"  Page: {short} (full: {activity_name})")
+        else:
+            phone_lines.append(f"  Page: {activity_name}")
     phone_lines.append(f"  Keyboard: {'visible' if is_editable else 'hidden'}")
     if focused_text:
         phone_lines.append(f"  Focused: \"{focused_text}\"")

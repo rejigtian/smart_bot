@@ -29,6 +29,54 @@ logger = logging.getLogger(__name__)
 _LogCallback = Optional[Callable[[str], Coroutine[Any, Any, None]]]
 
 
+def _combine_screenshots(a_b64: str, b_b64: str) -> str:
+    """Stack two screenshots vertically with labels for the final report.
+
+    Returns base64 JPEG of the combined image, or empty string on failure.
+    If one is missing or both are identical, returns the available one.
+    """
+    if not a_b64 and not b_b64:
+        return ""
+    if not a_b64:
+        return b_b64
+    if not b_b64 or a_b64 == b_b64:
+        return a_b64
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        img_a = Image.open(io.BytesIO(base64.b64decode(a_b64))).convert("RGB")
+        img_b = Image.open(io.BytesIO(base64.b64decode(b_b64))).convert("RGB")
+        # Normalize widths
+        w = min(img_a.width, img_b.width, 720)
+        scale_a = w / img_a.width
+        scale_b = w / img_b.width
+        h_a = int(img_a.height * scale_a)
+        h_b = int(img_b.height * scale_b)
+        if scale_a != 1.0:
+            img_a = img_a.resize((w, h_a), Image.LANCZOS)
+        if scale_b != 1.0:
+            img_b = img_b.resize((w, h_b), Image.LANCZOS)
+
+        # Label bar height
+        bar = 28
+        combined = Image.new("RGB", (w, h_a + h_b + bar * 2), (30, 30, 30))
+        draw = ImageDraw.Draw(combined)
+        try:
+            font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 16)
+        except Exception:
+            font = ImageFont.load_default()
+        draw.text((10, 6), "A — at-action (toast may be visible)", fill=(255, 255, 255), font=font)
+        combined.paste(img_a, (0, bar))
+        draw.text((10, bar + h_a + 6), "B — settled (fresh screenshot)", fill=(255, 255, 255), font=font)
+        combined.paste(img_b, (0, bar + h_a + bar))
+
+        out = io.BytesIO()
+        combined.save(out, format="JPEG", quality=75, optimize=True)
+        return base64.b64encode(out.getvalue()).decode()
+    except Exception as exc:
+        logger.warning("Failed to combine screenshots: %s", exc)
+        return a_b64 or b_b64
+
+
 class LLMVerifier:
     """Verifies that the expected result is visible on screen before accepting a pass."""
 
@@ -120,19 +168,26 @@ class LLMVerifier:
             },
             {
                 "role": "user",
-                "content": [
+                "content": (
+                    [
+                        {"type": "text", "text": "SCREENSHOT A — captured right after the final action (transient UI like toasts may be visible here):"},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{pre_b64}"}},
+                    ] if pre_b64 and pre_b64 != fresh_b64 else []
+                ) + [
+                    {"type": "text", "text": "SCREENSHOT B — captured fresh now (settled state, transient UI gone):" if pre_b64 and pre_b64 != fresh_b64 else "Screenshot:"},
                     {
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{verify_b64}"},
+                        "image_url": {"url": f"data:image/jpeg;base64,{fresh_b64 or pre_b64}"},
                     },
                     {
                         "type": "text",
                         "text": (
-                            "STEP 1 — Describe what you literally see on this screenshot:\n"
-                            "(This screenshot was captured right after the final action, "
-                            "so transient UI like toasts/popups should still be visible.)\n"
-                            "List the current screen/page name, all visible text labels, "
-                            "numbers, progress bars, and any content shown. Be specific.\n\n"
+                            "STEP 1 — Describe what you see across the screenshot(s):\n"
+                            "If two screenshots were provided, compare them — A shows the moment "
+                            "right after action (may include toasts/animations/transient notifications), "
+                            "B shows the settled state. Both are valid evidence.\n"
+                            "List the current screen/page name, all visible text labels, numbers, "
+                            "progress bars, and any content shown. Be specific.\n\n"
                             f"STEP 2 — Compare to the expected result:\n"
                             f"Expected: {expected}"
                             f"{agent_reason_section}"
@@ -185,10 +240,10 @@ class LLMVerifier:
 
             content_clean = re.sub(r"^```[a-z]*\n?", "", content).rstrip("` \n")
             json_match = re.search(r"\{.*\}", content_clean, re.DOTALL)
-            # Return the screenshot that was actually used for verification.
-            # If pre_b64 was used (has transient UI like toasts), return it so
-            # the final report shows what the agent/verifier actually saw.
-            final_b64 = verify_b64 or fresh_b64
+            # Combine both screenshots into one for the report — stack vertically
+            # with a divider, so reviewers can see both the "at-action" frame
+            # (with toast) and the "settled" frame.
+            final_b64 = _combine_screenshots(pre_b64, fresh_b64) or verify_b64 or fresh_b64
 
             if json_match:
                 data = json.loads(json_match.group())

@@ -136,11 +136,19 @@ def _annotate_screenshot(
             draw.text((iw - (bb[2] - bb[0]) - 3, py - th // 2), label,
                       fill=(180, 180, 180, 180), font=small_font)
 
-        # ── Layer 2: SoM dots (only when a11y elements are available) ─────────
+        # ── Layer 2: SoM crosshair markers ────────────────────────────────────
+        # Bright magenta CROSSHAIRS (+) — distinctive overlay style, NEVER
+        # confused with in-game elements (games don't use bright magenta
+        # crosshairs as collectibles). Number labeled next to the crosshair,
+        # not inside a filled shape.
         if elements and screen_width and screen_height:
             sx = iw / screen_width
             sy = ih / screen_height
-            r = max(9, min(15, iw // 58))
+            n = len(elements)
+            # Crosshair arm length — smaller when crowded
+            arm = max(4, min(8, iw // 90)) if n <= 20 else max(3, iw // 120)
+            stroke = (255, 0, 180, 230)       # bright magenta, high opacity
+            stroke_outline = (255, 255, 255, 220)  # white halo for contrast
 
             for el in elements:
                 cx, cy = el.get("cx", 0), el.get("cy", 0)
@@ -150,16 +158,23 @@ def _annotate_screenshot(
                 iy = int(cy * sy)
                 label = str(el["index"])
 
-                draw.ellipse(
-                    [ix - r, iy - r, ix + r, iy + r],
-                    fill=(30, 120, 255, 210),
-                    outline=(255, 255, 255, 255),
-                    width=1,
-                )
-                bb = draw.textbbox((0, 0), label, font=dot_font)
-                tw, th = bb[2] - bb[0], bb[3] - bb[1]
-                draw.text((ix - tw // 2, iy - th // 2 - 1), label,
-                          fill=(255, 255, 255, 255), font=dot_font)
+                # White halo for contrast on dark/bright backgrounds
+                draw.line([(ix - arm - 1, iy), (ix + arm + 1, iy)], fill=stroke_outline, width=3)
+                draw.line([(ix, iy - arm - 1), (ix, iy + arm + 1)], fill=stroke_outline, width=3)
+                # Magenta crosshair
+                draw.line([(ix - arm, iy), (ix + arm, iy)], fill=stroke, width=1)
+                draw.line([(ix, iy - arm), (ix, iy + arm)], fill=stroke, width=1)
+
+                # Label OUTSIDE the crosshair — white text with black outline
+                # so it's readable on any background
+                bb = draw.textbbox((0, 0), label, font=small_font)
+                lw, lh = bb[2] - bb[0], bb[3] - bb[1]
+                lx, ly = ix + arm + 2, iy - lh - 1
+                # Black outline
+                for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    draw.text((lx + dx, ly + dy), label, fill=(0, 0, 0, 200), font=small_font)
+                # White text
+                draw.text((lx, ly), label, fill=(255, 255, 255, 255), font=small_font)
 
         annotated = Image.alpha_composite(img, overlay).convert("RGB")
         out = io.BytesIO()
@@ -200,13 +215,13 @@ def _is_tree_sufficient(elements: list) -> bool:
     return True
 
 
-# Actions that need extra time for the screen to settle
-# Note: tap_element/tap already get a 0.6s transient capture inside the dispatch
-# loop, so their post-action delay only needs to cover the remaining settle time.
+# Actions that need extra time for the screen to settle.
+# tap_element/tap include a 0.35s transient capture inside the dispatch loop,
+# so post-action delay only covers the remaining settle time (~0.9s).
 _POST_ACTION_DELAYS: dict = {
-    "start_app": 2.5,    # app launch
-    "global_action": 1.5, # back/home/recent — waits for screen transition
-    "tap_element": 0.9,  # total settle = 0.6 (transient capture) + 0.9 = 1.5s
+    "start_app": 2.5,
+    "global_action": 1.5,
+    "tap_element": 0.9,   # total settle ≈ 0.35 (transient) + 0.9 = 1.25s
     "tap": 0.9,
 }
 # Actions that are nearly instantaneous (no screen change expected)
@@ -458,6 +473,8 @@ class TestCaseAgent:
             init_messages.append({"role": "user", "content": plan_message})
         memory = AgentMemory(messages=init_messages, pinned_count=len(init_messages))
         steps = 0
+        verify_fail_count = 0  # circuit breaker — auto-fail after N verify rejections
+        _MAX_VERIFY_FAILS = 3
         last_screenshot_b64 = ""
         llm_img_b64 = ""
         log_lines: list[str] = [goal]
@@ -470,6 +487,10 @@ class TestCaseAgent:
         _step_action_ms = 0
         _case_total_tokens = 0
         _steps_without_screenshot = 0  # force screenshot every N text-only steps
+        _force_screenshot_next = False # set by request_screenshot tool
+        _screenshot_requests_used = 0  # rate limit: max 3 per case
+        _MAX_SCREENSHOT_REQUESTS = 3
+        _last_action_screenshot_b64 = ""  # transient screenshot after most recent tap (has toast/animation)
 
         try:
             while steps < self.max_steps:
@@ -478,17 +499,27 @@ class TestCaseAgent:
 
                 # ── Perception ────────────────────────────────────────────────
                 _t0 = time.monotonic()
-                try:
-                    img_bytes = await self.device.screenshot()
-                    last_screenshot_b64 = base64.b64encode(img_bytes).decode()
-                    resized_bytes, img_w, img_h = _resize_screenshot(img_bytes)
-                except Exception as e:
-                    await self._log(f"Screenshot failed: {e}")
+                img_bytes = None
+                last_err = None
+                for attempt in range(3):  # 3 tries: initial + 2 retries
+                    try:
+                        img_bytes = await self.device.screenshot()
+                        break
+                    except Exception as e:
+                        last_err = e
+                        if attempt < 2:
+                            await self._log(f"Screenshot failed ({e}) — retry {attempt + 1}/2 after 2s")
+                            await asyncio.sleep(2.0)
+                        else:
+                            await self._log(f"Screenshot failed after 3 attempts: {e}")
+                if img_bytes is None:
                     return CaseResult(
-                        status="error", reason=f"Screenshot failed: {e}",
+                        status="error", reason=f"Screenshot failed: {last_err}",
                         steps=steps, log="\n".join(log_lines),
                         step_logs=step_logs_list,
                     )
+                last_screenshot_b64 = base64.b64encode(img_bytes).decode()
+                resized_bytes, img_w, img_h = _resize_screenshot(img_bytes)
 
                 ui_text = ""
                 _ui_elements: list = []
@@ -531,6 +562,7 @@ class TestCaseAgent:
                     not tree_ok_pre
                     or steps == 0
                     or _steps_without_screenshot >= _STEPS_BETWEEN_SCREENSHOTS
+                    or _force_screenshot_next
                 )
                 if will_send_image:
                     annotated = _annotate_screenshot(
@@ -544,26 +576,72 @@ class TestCaseAgent:
                 _step_perception_ms = int((time.monotonic() - _t0) * 1000)
 
                 # Log first meaningful line of UI state (app/screen info)
+                # and record current Activity for page-stuck detection.
+                current_activity = ""
                 if ui_text:
-                    ui_summary = next(
-                        (ln.strip() for ln in ui_text.splitlines() if ln.strip() and ln.strip() != "[Device State]"),
-                        ""
-                    )
+                    ui_summary = ""
+                    for ln in ui_text.splitlines():
+                        ln_stripped = ln.strip()
+                        if not ln_stripped or ln_stripped == "[Device State]":
+                            continue
+                        if not ui_summary:
+                            ui_summary = ln_stripped
+                        if ln_stripped.startswith("Page:"):
+                            # e.g. "Page: CreateRoomActivity (full: com.example.xxx)"
+                            import re as _re
+                            m = _re.match(r"Page:\s*(\S+)", ln_stripped)
+                            if m:
+                                current_activity = m.group(1)
                     if ui_summary:
                         await self._log(f"  📱 {ui_summary}")
 
                 # ── Memory ────────────────────────────────────────────────────
                 memory.drop_old_images()
+                memory.record_activity(current_activity)
+
+                # Inject "Recent pages" trail into [Device State] — helps agent
+                # understand navigation history without needing real Activity stack.
+                if len(memory._activity_history) >= 2 and ui_text:
+                    recent = memory._activity_history[-5:]
+                    # Deduplicate consecutive duplicates
+                    trail = []
+                    for a in recent:
+                        short = a.rsplit(".", 1)[-1]
+                        if not trail or trail[-1] != short:
+                            trail.append(short)
+                    if len(trail) >= 2:
+                        trail_line = f"  Recent pages: {' → '.join(trail)}"
+                        # Insert right after "Page:" line if present, else after "App:"
+                        lines = ui_text.split("\n")
+                        inserted = False
+                        for i, ln in enumerate(lines):
+                            if ln.strip().startswith("Page:"):
+                                lines.insert(i + 1, trail_line)
+                                inserted = True
+                                break
+                        if not inserted:
+                            for i, ln in enumerate(lines):
+                                if ln.strip().startswith("App:"):
+                                    lines.insert(i + 1, trail_line)
+                                    inserted = True
+                                    break
+                        if inserted:
+                            ui_text = "\n".join(lines)
 
                 # Decide whether to include screenshot or go text-only.
                 # Rich a11y tree → text-only (save ~60% tokens, 2-3x faster).
                 # Weak/empty tree, first step, or periodic check → include image.
                 tree_ok = _is_tree_sufficient(_ui_elements)
+                _was_agent_requested = _force_screenshot_next
                 need_screenshot = (
                     not tree_ok                                          # weak tree (game/H5/Canvas)
                     or steps == 0                                        # first step always needs visual
                     or _steps_without_screenshot >= _STEPS_BETWEEN_SCREENSHOTS  # periodic visual check
+                    or _force_screenshot_next                            # agent requested via request_screenshot tool
                 )
+                # Consume the forced-screenshot flag after use
+                if _force_screenshot_next and need_screenshot:
+                    _force_screenshot_next = False
 
                 if need_screenshot:
                     step_text = memory.build_step_text(steps, ui_text, img_w, img_h)
@@ -577,7 +655,9 @@ class TestCaseAgent:
                         ],
                     })
                     _steps_without_screenshot = 0
-                    if steps > 0 and tree_ok:
+                    if _was_agent_requested:
+                        await self._log("  📷 Screenshot included (agent requested)")
+                    elif steps > 0 and tree_ok:
                         await self._log("  📷 Periodic screenshot check")
                     elif not tree_ok:
                         n = len(_ui_elements)
@@ -731,6 +811,37 @@ class TestCaseAgent:
                         })
                         continue
 
+                    if fn_name == "request_screenshot":
+                        if _screenshot_requests_used >= _MAX_SCREENSHOT_REQUESTS:
+                            result_text = (
+                                f"Rejected: already used {_screenshot_requests_used}/"
+                                f"{_MAX_SCREENSHOT_REQUESTS} screenshot requests this case. "
+                                "Trust the UI Elements list."
+                            )
+                            await self._log(f"    🚫 {result_text}")
+                        elif need_screenshot:
+                            # Current step already sent a screenshot — no need to flag next one
+                            result_text = (
+                                "No effect: current step already included a screenshot. "
+                                "You already have visual context."
+                            )
+                            await self._log(f"    ⚠ {result_text}")
+                        else:
+                            _force_screenshot_next = True
+                            _screenshot_requests_used += 1
+                            result_text = (
+                                f"OK: screenshot will be included next step "
+                                f"({_screenshot_requests_used}/{_MAX_SCREENSHOT_REQUESTS} used)."
+                            )
+                            await self._log(f"    📸 {result_text}")
+                        tool_results.append({
+                            "tool_call_id": tc.id,
+                            "role": "tool",
+                            "name": fn_name,
+                            "content": result_text,
+                        })
+                        continue
+
                     if fn_name == "mark_done":
                         status = args["status"]
                         reason = args.get("reason", "")
@@ -752,10 +863,17 @@ class TestCaseAgent:
                                 self.device, case.expected, self._log,
                                 action_history=memory.action_history,
                                 agent_reason=reason,
-                                pre_screenshot_b64=_step_screenshot_b64,
+                                # Pass last post-action transient (closest to toast)
+                                # instead of current step's (post-settle, toast gone)
+                                pre_screenshot_b64=_last_action_screenshot_b64 or _step_screenshot_b64,
                             )
                             if v_b64:
                                 last_screenshot_b64 = v_b64
+                                # Use verifier's combined screenshot (pre+fresh) as
+                                # this step's evidence in the replay — captures the
+                                # post-action state which is critical for mark_done
+                                # debugging.
+                                _step_screenshot_b64 = v_b64
                             if confirmed:
                                 await self._log(f"  ✓ Verified: {v_reason}")
                                 log_lines.append(f"[{steps}] VERIFIED_PASS: {v_reason}")
@@ -769,15 +887,48 @@ class TestCaseAgent:
                                 )
                                 result_text = "Marked as pass (verified)"
                             else:
+                                verify_fail_count += 1
                                 await self._log(f"  ✗ Pass rejected — {v_reason}")
                                 if v_gap:
                                     await self._log(f"  📋 Gap: {v_gap}")
-                                log_lines.append(f"[{steps}] VERIFY_FAIL: {v_reason}")
+                                log_lines.append(f"[{steps}] VERIFY_FAIL ({verify_fail_count}/{_MAX_VERIFY_FAILS}): {v_reason}")
+
+                                # Circuit breaker: too many failed mark_done(pass) attempts
+                                # means the agent is hallucinating or task is impossible
+                                if verify_fail_count >= _MAX_VERIFY_FAILS:
+                                    await self._log(
+                                        f"  🛑 Circuit broken: {verify_fail_count} consecutive verify failures — "
+                                        "agent appears to be hallucinating. Auto-failing."
+                                    )
+                                    return CaseResult(
+                                        status="fail",
+                                        reason=(
+                                            f"Verification rejected {verify_fail_count} times in a row. "
+                                            f"Last reason: {v_reason}"
+                                        ),
+                                        steps=steps + 1,
+                                        screenshot_b64=last_screenshot_b64,
+                                        log="\n".join(log_lines),
+                                        action_history=list(memory.action_records),
+                                        step_logs=step_logs_list,
+                                    )
+
                                 gap_hint = f" Gap: {v_gap}" if v_gap else ""
+                                # Strong correction message — explicitly tell the agent
+                                # not to repeat the same false claim, and consult fresh
+                                # observation from THIS step's screenshot only.
                                 result_text = (
-                                    f"Verification failed: {v_reason}.{gap_hint} "
-                                    "The expected result is NOT confirmed on screen. "
-                                    "Continue navigating to reach the correct state."
+                                    f"VERIFICATION REJECTED ({verify_fail_count}/{_MAX_VERIFY_FAILS}): {v_reason}.{gap_hint}\n\n"
+                                    "IMPORTANT:\n"
+                                    "- Do NOT repeat the same mark_done claim. Your previous reason "
+                                    "did not match what's actually on screen.\n"
+                                    "- Re-read the CURRENT screenshot and [UI Elements] carefully — "
+                                    "ignore numbers from your past messages or memory.\n"
+                                    "- Possible reasons: (a) the action had no effect (UI may be "
+                                    "blocked, e.g. game debuff), (b) you misread the screen, "
+                                    "(c) you need a different action.\n"
+                                    "- If the expected result is genuinely not achievable, call "
+                                    "mark_done(status='fail') honestly instead of repeating false claims."
                                 )
                         else:
                             done_result = CaseResult(
@@ -817,16 +968,16 @@ class TestCaseAgent:
                         memory.record_action(steps, fn_name, args, result_text)
                         dispatched_names.append(fn_name)
 
-                        # Capture a transient screenshot shortly after tap to
-                        # preserve toasts/animations that disappear within 1-2s.
-                        # This becomes the step's saved screenshot (for replay
-                        # and verification), not the cleaner one taken later.
+                        # Capture one transient screenshot shortly after tap to
+                        # preserve short-lived UI (toasts, floating +N, flash).
+                        # Single fixed timing is more reliable than burst — the
+                        # "largest sample" heuristic could pick mid-transition
+                        # frames that confuse the next step's perception.
                         if fn_name in ("tap_element", "tap") and not result_text.startswith("ERROR"):
                             try:
-                                await asyncio.sleep(0.6)  # wait for animation to start, toast to appear
+                                await asyncio.sleep(0.35)  # toast window sweet spot
                                 transient_bytes = await self.device.screenshot()
-                                resized_t, tw, th = _resize_screenshot(transient_bytes)
-                                # Annotate if we have elements (for replay clarity)
+                                resized_t, _, _ = _resize_screenshot(transient_bytes)
                                 if _ui_elements:
                                     annotated_t = _annotate_screenshot(
                                         resized_t, _ui_elements,
@@ -836,6 +987,7 @@ class TestCaseAgent:
                                 else:
                                     _step_screenshot_b64 = base64.b64encode(resized_t).decode()
                                 last_screenshot_b64 = base64.b64encode(transient_bytes).decode()
+                                _last_action_screenshot_b64 = base64.b64encode(resized_t).decode()
                             except Exception:
                                 pass
 
@@ -850,7 +1002,11 @@ class TestCaseAgent:
 
                 # ── Record step for replay ─────────────────────────────────────
                 _step_action_ms = int((time.monotonic() - _t2) * 1000)
-                if dispatched_names or done_result is not None:
+                # Record StepLog for ANY step with tool calls — including
+                # mark_done (even rejected), remember, request_screenshot.
+                # Previously we only recorded steps with device actions, which
+                # left mark_done attempts invisible in the replay.
+                if tool_calls:
                     action_parts = [
                         f"{tc.function.name}({tc.function.arguments})"
                         for tc in tool_calls

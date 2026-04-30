@@ -122,7 +122,8 @@ class WebSocketDevice:
         return 0, 0
 
     async def screenshot(self) -> bytes:
-        result = await self._rpc("screenshot", {"hideOverlay": True}, timeout=15.0)
+        # Longer timeout — Unity/Canvas pages can take 10s+ to yield to a11y
+        result = await self._rpc("screenshot", {"hideOverlay": True}, timeout=25.0)
         if isinstance(result, str):
             b64 = result
         elif isinstance(result, dict):

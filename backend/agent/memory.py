@@ -51,6 +51,11 @@ class AgentMemory:
     _summary: str = ""
     _steps_since_compress: int = 0
 
+    # Track visited Activities/pages — for "stuck on same screen" detection
+    # that's independent of action-level stuck (since agent might try diverse
+    # actions on the wrong page).
+    _activity_history: List[str] = field(default_factory=list)
+
     # Recovery escalation — tracks how long the agent has been stuck.
     # Resets when is_stuck() returns False.
     recovery_level: int = 0  # 0=normal, 1=warned, 2=force back, 3=force restart, 4=force fail
@@ -186,11 +191,19 @@ class AgentMemory:
         self._call_signatures.append(sig)
         self.action_records.append({"step": step + 1, "fn_name": fn_name, "args": args, "result": result[:120]})
 
+    def record_activity(self, activity: str) -> None:
+        """Track current Activity/page — used for Recent pages trail in [Device State]."""
+        if activity:
+            self._activity_history.append(activity)
+            if len(self._activity_history) > 15:
+                self._activity_history = self._activity_history[-15:]
+
     def is_stuck(self, window: int = _STUCK_WINDOW) -> bool:
         """Return True if the last `window` actions are all identical.
 
-        Also manages recovery_level escalation: increments when stuck,
-        resets when not stuck.
+        Only action-level stuck (same action repeated) counts for recovery
+        escalation. Page-stuck alone is NORMAL — many tasks run entirely
+        within one Activity. Use is_page_stuck() separately for warnings.
         """
         if len(self._call_signatures) < window:
             self.recovery_level = 0
@@ -244,8 +257,9 @@ class AgentMemory:
             if self.recovery_level <= 1:
                 stuck_warn = (
                     f"\n\n⚠ WARNING: You repeated {fn}() {_STUCK_WINDOW}+ times with no change. "
-                    f"Try a DIFFERENT approach: scroll() to find the element, or "
-                    f"global_action('back') to return to the previous screen."
+                    f"Try: (1) scroll() if the target element might be off-screen, "
+                    f"(2) global_action('back') to exit this screen, "
+                    f"(3) start_app(target_package) to reset to app home."
                 )
             elif self.recovery_level == 2:
                 stuck_warn = (
